@@ -12,20 +12,20 @@ const EMPTY_DISCOUNT: FunctionResult = {
 };
 
 type Tier = {
-  quantity: number
-  amount: number
-  title: string
-}
+  quantity: number;
+  amount: number;
+  title: string;
+};
 
 type MetafieldValue = {
-  title: string
-  discountType: 'PERCENTAGE' | 'FIXED_AMOUNT'
-  products: string[]
-  collections: string[]
-  tiers: Tier[]
-}
+  title: string;
+  discountType: "PERCENTAGE" | "FIXED_AMOUNT" | "FIXED_BUNDLE_PRICE";
+  products: string[];
+  collections: string[];
+  tiers: Tier[];
+};
 
-type CartItem = InputQuery['cart']['lines'][number]
+type CartItem = InputQuery["cart"]["lines"][number];
 
 type PropertyName = string | number | symbol;
 
@@ -61,7 +61,7 @@ function combineTargets(targets: Target[]): Target[] {
   const combinedTargets: { [id: string]: number } = {};
 
   // Loop through each target and add its quantity to the combined total for its productVariant.id
-  targets.forEach(target => {
+  targets.forEach((target) => {
     const id = target.productVariant.id;
     const quantity = target.productVariant.quantity;
 
@@ -73,7 +73,7 @@ function combineTargets(targets: Target[]): Target[] {
   });
 
   // Create a new array of targets with the combined total quantities
-  const result: Target[] = Object.keys(combinedTargets).map(id => ({
+  const result: Target[] = Object.keys(combinedTargets).map((id) => ({
     productVariant: {
       id,
       quantity: combinedTargets[id],
@@ -84,15 +84,15 @@ function combineTargets(targets: Target[]): Target[] {
 }
 
 type Options = {
-  discountType: 'PERCENTAGE' | 'FIXED_AMOUNT'
-  title: string
-}
+  discountType: "PERCENTAGE" | "FIXED_AMOUNT" | "FIXED_BUNDLE_PRICE";
+  title: string;
+};
 
 type PercentageValue = {
   percentage: {
     value: string;
   };
-}
+};
 
 type FixedAmountValue = {
   fixedAmount: {
@@ -105,101 +105,167 @@ type FixedAmountValue = {
  * @param discounts An array of discount objects
  * @returns A single discount object with a message, value, and targets
  */
-function combineDiscounts(discounts: ReturnType<typeof calculateBestDiscountCombo>, fallBackTitle: string) {
+function combineDiscounts(
+  discounts: ReturnType<typeof calculateBestDiscountCombo>,
+  fallBackTitle: string
+) {
   if (discounts.length === 0) return [];
-  if (discounts.length === 1) return [{
-    ...discounts[0],
-    targets: combineTargets(discounts[0].targets.map(item => ({
-      productVariant: {
-        id: (item.merchandise as ProductVariant).id,
-        quantity: item.quantity
-      }
-    })))
-  }];
+  if (discounts.length === 1)
+    return [
+      {
+        ...discounts[0],
+        targets: combineTargets(
+          discounts[0].targets.map((item) => ({
+            productVariant: {
+              id: (item.merchandise as ProductVariant).id,
+              quantity: item.quantity,
+            },
+          }))
+        ),
+      },
+    ];
   // combine discounts
   const totalDiscountValue = discounts.reduce((final, discount) => {
     let discountedAmount = 0;
     for (const target of discount.targets) {
-      if ((discount as any).value['percentage']) {
-        discountedAmount += target.cost.amountPerQuantity.amount * target.quantity * parseFloat((discount.value as PercentageValue).percentage.value) / 100
+      if ((discount as any).value["percentage"]) {
+        discountedAmount +=
+          (target.cost.amountPerQuantity.amount *
+            target.quantity *
+            parseFloat((discount.value as PercentageValue).percentage.value)) /
+          100;
       } else {
-        discountedAmount += parseFloat((discount.value as FixedAmountValue).fixedAmount.amount)
+        discountedAmount += parseFloat(
+          (discount.value as FixedAmountValue).fixedAmount.amount
+        );
       }
     }
-    return final + discountedAmount
+    return final + discountedAmount;
   }, 0);
 
-  const combinedTargets = combineTargets(discounts.map(discount => discount.targets.map((item => ({
-    productVariant: {
-      id: (item.merchandise as ProductVariant).id,
-      quantity: item.quantity
-    }
-  })))).flat())
+  const combinedTargets = combineTargets(
+    discounts
+      .map((discount) =>
+        discount.targets.map((item) => ({
+          productVariant: {
+            id: (item.merchandise as ProductVariant).id,
+            quantity: item.quantity,
+          },
+        }))
+      )
+      .flat()
+  );
 
-  return [{
-    message: fallBackTitle,
-    value: {
-      fixedAmount: {
-        amount: totalDiscountValue.toString()
-      }
+  return [
+    {
+      message: fallBackTitle,
+      value: {
+        fixedAmount: {
+          amount: totalDiscountValue.toString(),
+        },
+      },
+      targets: combinedTargets,
     },
-    targets: combinedTargets
-  }]
+  ];
 }
 
 /**
  * Calculates the best discount combination based on the given line items and discount tiers.
  * It determines the highest applicable tier, applies the discount, and groups the line items.
- * 
+ *
  * @param lineItems - Array of cart items to be discounted
  * @param tiers - Array of discount tiers, each with a quantity threshold and discount amount
  * @param options - Object containing discount type and title
  * @returns An array of discount objects, each with a message, value, and targets
  */
-function calculateBestDiscountCombo(lineItems: CartItem[], tiers: Tier[], options: Options) {
+function calculateBestDiscountCombo(
+  lineItems: CartItem[],
+  tiers: Tier[],
+  options: Options
+) {
   tiers.sort((a, b) => b.amount - a.amount);
-  const expandedLineItems: CartItem[] = lineItems.flatMap(lineItem => Array(lineItem.quantity).fill(lineItem).map(lineItem => ({...lineItem, quantity: 1})));
+  const expandedLineItems: CartItem[] = lineItems.flatMap((lineItem) =>
+    Array(lineItem.quantity)
+      .fill(lineItem)
+      .map((lineItem) => ({ ...lineItem, quantity: 1 }))
+  );
 
   let discounts: {
-    message: string
-    value: PercentageValue | FixedAmountValue
-    targets: CartItem[]
-  }[] = []
-  const appliedQuantityOfTier = Math.max(...tiers.reduce((prev: number[], item: Tier) => {
-    if(item.quantity <= expandedLineItems.length) return [...prev, item.quantity];
-    return prev;
-  }, [0]))
-
-  const appliedTier = tiers.find(tier => appliedQuantityOfTier === tier.quantity)
-  if(appliedTier) {
-    discounts = [{
-      message: appliedTier.title || options.title,
-      value: options.discountType === 'PERCENTAGE' ? {
-        percentage: {
-          value: appliedTier.amount.toString()
-        }
-      } : {
-        fixedAmount: {
-          amount: appliedTier.amount.toString(),
-        }
+    message: string;
+    value: PercentageValue | FixedAmountValue;
+    targets: CartItem[];
+  }[] = [];
+  const appliedQuantityOfTier = Math.max(
+    ...tiers.reduce(
+      (prev: number[], item: Tier) => {
+        if (item.quantity <= expandedLineItems.length)
+          return [...prev, item.quantity];
+        return prev;
       },
-      targets: Object.values(groupBy(
-        expandedLineItems,
-        item => item.id
-      )).reduce((final, lineItemGroups) => {
-        return [
-          ...final,
-          {
-            ...lineItemGroups[0],
-            quantity: lineItemGroups.reduce((sum, item) => sum+item.quantity, 0)
-          }
-        ]
-      }, [] as CartItem[])
-    }]
+      [0]
+    )
+  );
+
+  const appliedTier = tiers.find(
+    (tier) => appliedQuantityOfTier === tier.quantity
+  );
+  if (appliedTier) {
+    const eligibleItems = expandedLineItems.slice(0, appliedTier.quantity);
+    const totalOriginalPrice = eligibleItems.reduce(
+      (sum, item) => sum + parseFloat(item.cost.amountPerQuantity.amount),
+      0
+    );
+
+    if (options.discountType === "FIXED_BUNDLE_PRICE") {
+      const totalDiscount = totalOriginalPrice - appliedTier.amount;
+      const discountPerItem = totalDiscount / appliedTier.quantity;
+
+      discounts = [
+        {
+          message: appliedTier.title || options.title,
+          value: {
+            fixedAmount: {
+              amount: totalDiscount.toFixed(2),
+            },
+          },
+          targets: Object.values(groupBy(eligibleItems, (item) => item.id)).map(
+            (group) => ({
+              ...group[0],
+              quantity: group.length,
+            })
+          ),
+        },
+      ];
+    } else {
+      discounts = [
+        {
+          message: appliedTier.title || options.title,
+          value:
+            options.discountType === "FIXED_AMOUNT"
+              ? {
+                  fixedAmount: {
+                    amount: appliedTier.amount.toString(),
+                  },
+                }
+              : {
+                  percentage: {
+                    value: appliedTier.amount.toString(),
+                  },
+                },
+          targets: Object.values(groupBy(eligibleItems, (item) => item.id)).map(
+            (group) => ({
+              ...group[0],
+              quantity: group.length,
+            })
+          ),
+        },
+      ];
+    }
   }
 
   return discounts;
 }
+
 export default function run(input: InputQuery): FunctionResult {
   const definition: MetafieldValue = JSON.parse(
     input?.discountNode?.metafield?.value ?? "{}"
@@ -214,22 +280,55 @@ export default function run(input: InputQuery): FunctionResult {
 
   const isCartItemValid = (line: CartItem) => {
     if (line.sellingPlanAllocation) return false;
-    if (products.length > 0) return products.includes((line.merchandise as ProductVariant).product?.id)
+    if (products.length > 0)
+      return products.includes(
+        (line.merchandise as ProductVariant).product?.id
+      );
     return (line.merchandise as ProductVariant).product.inAnyCollection;
-  }
+  };
   tiers.sort((a, b) => a.quantity - b.quantity);
 
-  const filteredLineItems = input.cart.lines.filter(isCartItemValid)
+  const filteredLineItems = input.cart.lines.filter(isCartItemValid);
   const discounts = calculateBestDiscountCombo(filteredLineItems, tiers, {
     discountType,
     title,
   });
 
-
   const result: FunctionResult = {
     discountApplicationStrategy: DiscountApplicationStrategy.Maximum,
-    discounts: combineDiscounts(discounts, title)
-  }
+    discounts: combineDiscounts(discounts, title),
+  };
   if (!result.discounts.length) return EMPTY_DISCOUNT;
   return result;
-};
+}
+function createInput(data: Partial<InputQuery>): InputQuery {
+  return {
+    discountNode: { metafield: { value: "{}" } },
+    cart: { lines: [] },
+    ...data,
+  } as InputQuery;
+}
+function createCartLine(
+  productId: string,
+  price: string,
+  quantity: number
+): CartItem {
+  return {
+    id: "dummy-id",
+    quantity,
+    merchandise: {
+      __typename: "ProductVariant",
+      id: "dummy-variant-id",
+      product: { id: productId },
+    },
+    cost: {
+      amountPerQuantity: { amount: price, currencyCode: "USD" },
+      totalAmount: {
+        amount: (parseFloat(price) * quantity).toString(),
+        currencyCode: "USD",
+      },
+    },
+  } as unknown as CartItem;
+}
+
+export { run, createInput, createCartLine };
